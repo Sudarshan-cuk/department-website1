@@ -39,7 +39,7 @@ const pageTransition = {
 };
 
 
-// --- Helper Functions ---
+// --- Helper Components ---
 const ErrorBox = ({ message }) => {
     if (!message) return null;
     return (
@@ -67,6 +67,22 @@ const SuccessBox = ({ message }) => {
         </motion.div>
     );
 };
+
+const LoginPrompt = ({ setPage }) => (
+    <div className="text-center py-16">
+        <Lock className="mx-auto h-16 w-16 text-gray-400" />
+        <h2 className="mt-4 text-2xl font-bold text-gray-800">Content Restricted</h2>
+        <p className="mt-2 text-gray-600">You must be logged in to view this page.</p>
+        <div className="mt-6 flex items-center justify-center gap-x-4">
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setPage('login')} className="flex items-center bg-orange-500 text-white px-6 py-2 rounded-md hover:bg-orange-600 transition duration-300">
+                <LogIn className="mr-2 h-5 w-5" /> Login
+            </motion.button>
+            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setPage('register')} className="flex items-center bg-green-500 text-white px-6 py-2 rounded-md hover:bg-green-600 transition duration-300">
+                <UserPlus className="mr-2 h-5 w-5" /> Register
+            </motion.button>
+        </div>
+    </div>
+);
 
 
 // --- Main App Component ---
@@ -116,11 +132,11 @@ export default function App() {
             case 'courses':
                 return <CoursesPage />;
             case 'faculty':
-                return <FacultyPage />;
+                return <FacultyPage user={user} setPage={setPage} />;
             case 'alumni':
-                return <AlumniPage />;
+                return <AlumniPage user={user} setPage={setPage} />;
             case 'gallery':
-                return <GalleryPage />;
+                return <GalleryPage user={user} setPage={setPage} />;
             case 'download':
                 return <DownloadAppPage />;
             case 'noticeboard':
@@ -502,20 +518,28 @@ const CoursesPage = () => {
     );
 };
 
-const FacultyPage = () => {
+const FacultyPage = ({ user, setPage }) => {
     const [faculty, setFaculty] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const facultyCollectionRef = collection(db, `artifacts/${appId}/public/data/faculty`);
-        const q = query(facultyCollectionRef, orderBy("name"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            setFaculty(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        if (user && !user.isAnonymous) {
+            const facultyCollectionRef = collection(db, `artifacts/${appId}/public/data/faculty`);
+            const q = query(facultyCollectionRef, orderBy("name"));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                setFaculty(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                setLoading(false);
+            });
+            return () => unsubscribe();
+        } else {
             setLoading(false);
-        });
-        return () => unsubscribe();
-    }, []);
+        }
+    }, [user]);
 
+    if (!user || user.isAnonymous) {
+        return <PageContainer title="Our Esteemed Faculty"><LoginPrompt setPage={setPage} /></PageContainer>;
+    }
+    
     if (loading) return <p>Loading faculty...</p>;
 
     return (
@@ -543,20 +567,28 @@ const FacultyPage = () => {
     );
 };
 
-const AlumniPage = () => {
+const AlumniPage = ({ user, setPage }) => {
     const [alumni, setAlumni] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
-        const alumniCollectionRef = collection(db, `artifacts/${appId}/public/data/alumni`);
-        const q = query(alumniCollectionRef, orderBy("year", "desc"), orderBy("name"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            setAlumni(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        if (user && !user.isAnonymous) {
+            const alumniCollectionRef = collection(db, `artifacts/${appId}/public/data/alumni`);
+            const q = query(alumniCollectionRef, orderBy("year", "desc"), orderBy("name"));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                setAlumni(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                setLoading(false);
+            });
+            return () => unsubscribe();
+        } else {
             setLoading(false);
-        });
-        return () => unsubscribe();
-    }, []);
+        }
+    }, [user]);
+
+    if (!user || user.isAnonymous) {
+        return <PageContainer title="Alumni Network"><LoginPrompt setPage={setPage} /></PageContainer>;
+    }
 
     const filteredAlumni = alumni.filter(person => 
         person.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -611,20 +643,28 @@ const AlumniPage = () => {
     );
 };
 
-const GalleryPage = () => {
+const GalleryPage = ({ user, setPage }) => {
     const [images, setImages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedImg, setSelectedImg] = useState(null);
 
     useEffect(() => {
-        const galleryCollectionRef = collection(db, `artifacts/${appId}/public/data/gallery`);
-        const q = query(galleryCollectionRef, orderBy("createdAt", "desc"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            setImages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        if (user && !user.isAnonymous) {
+            const galleryCollectionRef = collection(db, `artifacts/${appId}/public/data/gallery`);
+            const q = query(galleryCollectionRef, orderBy("createdAt", "desc"));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                setImages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                setLoading(false);
+            });
+            return () => unsubscribe();
+        } else {
             setLoading(false);
-        });
-        return () => unsubscribe();
-    }, []);
+        }
+    }, [user]);
+
+    if (!user || user.isAnonymous) {
+        return <PageContainer title="Event Gallery"><LoginPrompt setPage={setPage} /></PageContainer>;
+    }
 
     if (loading) return <p>Loading gallery...</p>;
 
