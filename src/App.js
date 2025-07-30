@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -7,23 +7,46 @@ import {
     signInWithEmailAndPassword, 
     signOut,
     signInAnonymously,
-    signInWithCustomToken
+    signInWithCustomToken,
+    sendPasswordResetEmail
 } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, onSnapshot, updateDoc, query, where, orderBy, deleteDoc } from 'firebase/firestore';
+import { initializeFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, onSnapshot, updateDoc, query, where, orderBy, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { Lock, User, Book, Briefcase, Phone, Home, Users, LogIn, LogOut, UserPlus, Atom, Feather, Quote, Landmark, Store, Video, FileText, BrainCircuit, BookCopy, ShieldCheck, Check, X, GraduationCap, Search, Megaphone, Info, Edit, Trash2, UserCircle, Download, Camera, MessageSquare, Upload } from 'lucide-react';
+import * as LucideIcons from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- Firebase Configuration ---
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{"apiKey":"AIzaSyA1wMCNN0UFzWcK_lajR8k12kYG5RIFzm0","authDomain":"dept-of-education-site.firebaseapp.com","projectId":"dept-of-education-site","storageBucket":"dept-of-education-site.firebasestorage.app","messagingSenderId":"753917525071","appId":"1:753917525071:web:003e17c1e716a8333ffe3a","measurementId":"G-YF2ELY4KH6"}';
+// This configuration is a placeholder and will be replaced by the environment's __firebase_config variable.
+const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{"apiKey":"YOUR_API_KEY","authDomain":"your-project-id.firebaseapp.com","projectId":"your-project-id","storageBucket":"your-project-id.appspot.com","messagingSenderId":"YOUR_SENDER_ID","appId":"YOUR_APP_ID"}';
 const firebaseConfig = JSON.parse(firebaseConfigString);
 
 // --- App Initialization ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+// FIX: Initialize Firestore with experimental settings to potentially mitigate network errors.
+// The ERR_QUIC_PROTOCOL_ERROR and 400 Bad Request on the 'Listen' stream suggest a network or firewall issue
+// that disrupts the standard WebChannel connection. Forcing long polling can provide a more stable
+// connection in such environments.
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false, // Fallback for environments that don't support fetch streams well
+});
 const storage = getStorage(app);
+// The __app_id variable is provided by the environment.
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-dept-app';
+
+// --- Icon Mapping ---
+// Allows us to specify icon names as strings in Firestore for dynamic rendering.
+const { Lock, User, Book, Briefcase, Phone, Home, Users, LogIn, LogOut, UserPlus, Atom, Feather, Quote, Landmark, Store, Video, FileText, BrainCircuit, BookCopy, ShieldCheck, Check, X, GraduationCap, Search, Megaphone, Info, Edit, Trash2, UserCircle, Download, Camera, MessageSquare, Upload, PlusCircle, AlertCircle } = LucideIcons;
+
+const DynamicIcon = ({ name, ...props }) => {
+    const IconComponent = LucideIcons[name];
+    if (!IconComponent) {
+        // Fallback icon if the specified one doesn't exist in lucide-react.
+        return <AlertCircle {...props} />;
+    }
+    return <IconComponent {...props} />;
+};
 
 // --- Animation Variants ---
 const pageVariants = {
@@ -90,23 +113,29 @@ export default function App() {
     const [page, setPage] = useState('home');
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [selectedCourse, setSelectedCourse] = useState(null);
 
+    // Effect for handling Firebase authentication state changes.
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser && !currentUser.isAnonymous) {
+                // If a user is logged in, fetch their profile from Firestore.
                 const userDocRef = doc(db, `artifacts/${appId}/users`, currentUser.uid);
                 const userDoc = await getDoc(userDocRef);
                 if (userDoc.exists()) {
                     setUser({ uid: currentUser.uid, ...userDoc.data(), isAnonymous: false });
                 } else {
+                     // If no profile exists, create a basic user object.
                      setUser({ uid: currentUser.uid, email: currentUser.email, isAnonymous: false });
                 }
             } else {
+                // Handle anonymous or logged-out users.
                 setUser(currentUser ? { isAnonymous: true } : null);
             }
             setLoading(false);
         });
 
+        // Function to handle initial authentication, using a custom token if provided.
         const initialAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -115,14 +144,16 @@ export default function App() {
                     await signInAnonymously(auth);
                 }
             } catch (error) {
-                console.error("Authentication failed:", error);
+                console.error("Initial authentication failed:", error);
             }
         };
 
         initialAuth();
+        // Cleanup subscription on component unmount.
         return () => unsubscribe();
     }, []);
 
+    // Router to render the correct page component based on the 'page' state.
     const renderPage = () => {
         switch (page) {
             case 'home':
@@ -130,11 +161,13 @@ export default function App() {
             case 'about':
                 return <AboutPage />;
             case 'courses':
-                return <CoursesPage />;
+                return <CoursesPage setPage={setPage} setSelectedCourse={setSelectedCourse} />;
             case 'faculty':
                 return <FacultyPage user={user} setPage={setPage} />;
             case 'alumni':
                 return <AlumniPage user={user} setPage={setPage} />;
+            case 'batchmates':
+                return <BatchmatesPage user={user} setPage={setPage} course={selectedCourse} />;
             case 'gallery':
                 return <GalleryPage user={user} setPage={setPage} />;
             case 'download':
@@ -149,6 +182,8 @@ export default function App() {
                 return <LoginPage setPage={setPage} />;
             case 'register':
                 return <RegisterPage setPage={setPage} />;
+            case 'forgot-password':
+                return <ForgotPasswordPage setPage={setPage} />;
             case 'admin':
                 return <AdminPage user={user} />;
             case 'profile':
@@ -158,6 +193,7 @@ export default function App() {
         }
     };
 
+    // Display a loading spinner while authentication is in progress.
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-100">
@@ -170,6 +206,7 @@ export default function App() {
         );
     }
 
+    // Main application layout.
     return (
         <div className="bg-gray-50 font-sans text-gray-800">
             <Header setPage={setPage} user={user} />
@@ -228,9 +265,9 @@ const Header = ({ setPage, user }) => {
                     <div className="flex-shrink-0">
                         <button onClick={() => setPage('home')} className="flex items-center space-x-2">
                              <svg className="h-10 w-10 text-orange-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
-                                <path d="M12 12.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 7.5 12 7.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5zM12 4.5c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 9c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                            </svg>
+                                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                                 <path d="M12 12.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 7.5 12 7.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5zM12 4.5c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 9c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                             </svg>
                             <span className="text-xl font-bold text-gray-800">Dept. of Education</span>
                         </button>
                     </div>
@@ -328,16 +365,28 @@ const Header = ({ setPage, user }) => {
 };
 
 // --- Page Components ---
-const PageContainer = ({ title, children }) => (
+const PageContainer = ({ title, children, backButton }) => (
     <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <motion.h1 
-            className="text-4xl font-extrabold text-gray-900 mb-6 border-b-4 border-orange-600 pb-2"
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-        >
-            {title}
-        </motion.h1>
+        <div className="flex items-center mb-6">
+            {backButton && (
+                 <motion.button 
+                    onClick={backButton} 
+                    className="mr-4 p-2 rounded-full hover:bg-gray-200 transition-colors"
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                >
+                    <LucideIcons.ArrowLeft className="h-6 w-6 text-gray-700"/>
+                </motion.button>
+            )}
+            <motion.h1 
+                className="text-4xl font-extrabold text-gray-900 border-b-4 border-orange-600 pb-2"
+                initial={{ opacity: 0, x: -50 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 }}
+            >
+                {title}
+            </motion.h1>
+        </div>
         <motion.div 
             className="bg-white p-6 sm:p-8 rounded-xl shadow-lg"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -382,15 +431,15 @@ const HomePage = ({ setPage }) => (
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.5, delay: 0.2 }}
                          >
-                            Integrated Teacher Education Programme (ITEP)
-                        </motion.p>
+                             Integrated Teacher Education Programme (ITEP)
+                         </motion.p>
                         <motion.p 
                             className="mt-6 text-lg leading-8 text-gray-600"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.5, delay: 0.4 }}
                         >
-                            Welcome, Sudarshan! This is the hub for aspiring educators. Explore our ITEP program, meet our faculty, and discover resources to shape your future in teaching.
+                            Welcome! This is the hub for aspiring educators at the Central University of Kerala, Periye. Explore our ITEP program, meet our faculty, and discover resources to shape your future in teaching.
                         </motion.p>
                         <motion.div 
                             className="mt-10 flex items-center justify-center gap-x-6"
@@ -453,67 +502,78 @@ const AboutPage = () => {
     );
 };
 
-const CoursesPage = () => {
-    const specializations = [
-        { 
-            title: "B.Sc. B.Ed. Physics", 
-            description: "Integrates the rigorous study of physical sciences with advanced pedagogical training, preparing future physics educators for the modern classroom.",
-            icon: Atom,
-            theme: { bg: "bg-blue-100", text: "text-blue-500", border: "border-blue-500" }
-        },
-        { 
-            title: "B.Sc. B.Ed. Zoology", 
-            description: "A dual-degree program combining life sciences with teacher training for aspiring biology educators, focusing on practical and theoretical knowledge.",
-            icon: Feather,
-            theme: { bg: "bg-green-100", text: "text-green-500", border: "border-green-500" }
-        },
-        { 
-            title: "B.A. B.Ed. English", 
-            description: "Develops a deep understanding of English literature and language, coupled with the art of teaching it effectively to diverse learners.",
-            icon: Quote,
-            theme: { bg: "bg-purple-100", text: "text-purple-500", border: "border-purple-500" }
-        },
-        { 
-            title: "B.A. B.Ed. Economics", 
-            description: "Combines economic theory and analysis with educational principles to prepare teachers who can demystify the world of economics for students.",
-            icon: Landmark,
-            theme: { bg: "bg-red-100", text: "text-red-500", border: "border-red-500" }
-        },
-        { 
-            title: "B.Com. B.Ed.", 
-            description: "An integrated program that equips students with commerce knowledge and teaching skills, creating competent educators for business and accounting subjects.",
-            icon: Store,
-            theme: { bg: "bg-yellow-100", text: "text-yellow-500", border: "border-yellow-500" }
-        },
-    ];
+const CoursesPage = ({ setPage, setSelectedCourse }) => {
+    const [courses, setCourses] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const coursesCollectionRef = collection(db, `artifacts/${appId}/public/data/courses`);
+        const q = query(coursesCollectionRef, orderBy("title"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setCourses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching courses: ", error);
+            setLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const handleViewBatchmates = (course) => {
+        setSelectedCourse(course);
+        setPage('batchmates');
+    };
+    
+    if (loading) return <p>Loading courses...</p>;
 
     return (
         <PageContainer title="Integrated Teacher Education Programme (ITEP)">
              <div className="text-center mb-12">
-                <h2 className="text-3xl font-bold text-gray-800">A 4-Year Dual-Degree Journey</h2>
-                <p className="text-lg text-gray-600 mt-2 max-w-3xl mx-auto">
-                    Our flagship ITEP is a comprehensive program preparing teachers for the new school structure. Choose your specialization and embark on a rewarding career in education.
-                </p>
-            </div>
+                 <h2 className="text-3xl font-bold text-gray-800">A 4-Year Dual-Degree Journey</h2>
+                 <p className="text-lg text-gray-600 mt-2 max-w-3xl mx-auto">
+                     Our flagship ITEP is a comprehensive program preparing teachers for the new school structure, as envisioned in NEP 2020. Choose your specialization and embark on a rewarding career in education.
+                 </p>
+             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {specializations.map((spec, index) => {
-                    const Icon = spec.icon;
+                {courses.map((spec, index) => {
+                    const theme = spec.theme || { bg: "bg-gray-100", text: "text-gray-500", border: "border-gray-500" };
                     return (
                         <motion.div 
-                            key={index} 
-                            className={`bg-white rounded-xl shadow-lg p-8 flex flex-col items-center text-center border-t-4 ${spec.theme.border}`}
+                            key={spec.id} 
+                            className={`bg-white rounded-xl shadow-lg p-8 flex flex-col justify-between border-t-4 ${theme.border}`}
                             whileHover={{ scale: 1.05, y: -10 }}
                             transition={{ type: 'spring', stiffness: 300 }}
                         >
-                            <div className={`p-4 rounded-full ${spec.theme.bg}`}>
-                                <Icon className={`h-12 w-12 ${spec.theme.text}`} />
+                            <div>
+                                <div className="flex justify-center mb-4">
+                                     <div className={`p-4 rounded-full ${theme.bg}`}>
+                                        <DynamicIcon name={spec.iconName || 'Book'} className={`h-12 w-12 ${theme.text}`} />
+                                    </div>
+                                </div>
+                                <div className="text-center">
+                                    <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-2">{spec.title}</h3>
+                                    <p className="text-gray-600 flex-grow">{spec.description}</p>
+                                </div>
                             </div>
-                            <h3 className="text-2xl font-bold text-gray-800 mt-6 mb-2">{spec.title}</h3>
-                            <p className="text-gray-600">{spec.description}</p>
+                            <div className="mt-6 text-center">
+                                <motion.button 
+                                     whileHover={{ scale: 1.05 }} 
+                                     whileTap={{ scale: 0.95 }}
+                                     onClick={() => handleViewBatchmates(spec)} 
+                                     className="bg-orange-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors w-full"
+                                >
+                                     View Batchmates
+                                 </motion.button>
+                            </div>
                         </motion.div>
                     )
                 })}
             </div>
+             {courses.length === 0 && !loading && (
+                <div className="text-center col-span-full py-10">
+                    <p className="text-gray-500">No courses have been added yet. Please check back later.</p>
+                </div>
+            )}
         </PageContainer>
     );
 };
@@ -556,13 +616,14 @@ const FacultyPage = ({ user, setPage }) => {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: index * 0.1 }}
                         >
-                            <img className="w-32 h-32 rounded-full mx-auto mb-4 border-4 border-gray-200 bg-gray-100 flex items-center justify-center" src={member.photoURL || `https://placehold.co/150x150/E2E8F0/4A5568?text=${initials}`} alt={member.name} />
+                            <img className="w-32 h-32 rounded-full mx-auto mb-4 border-4 border-gray-200 bg-gray-100 flex items-center justify-center object-cover" src={member.photoURL || `https://placehold.co/150x150/E2E8F0/4A5568?text=${initials}`} alt={member.name} />
                             <h3 className="text-xl font-bold text-gray-800">{member.name}</h3>
                             <p className="text-md text-orange-600 font-semibold">{member.title}</p>
                         </motion.div>
                     )
                 })}
             </div>
+             {faculty.length === 0 && <p className="text-center text-gray-500 mt-8">No faculty members have been added yet.</p>}
         </PageContainer>
     );
 };
@@ -575,9 +636,17 @@ const AlumniPage = ({ user, setPage }) => {
     useEffect(() => {
         if (user && !user.isAnonymous) {
             const alumniCollectionRef = collection(db, `artifacts/${appId}/public/data/alumni`);
-            const q = query(alumniCollectionRef, orderBy("year", "desc"), orderBy("name"));
+            // FIX: Removed compound orderBy to prevent index error. Sorting is now done client-side.
+            const q = query(alumniCollectionRef, orderBy("year", "desc"));
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                setAlumni(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                const alumniList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Client-side sort by year (desc), then name (asc)
+                alumniList.sort((a, b) => {
+                    if (a.year > b.year) return -1;
+                    if (a.year < b.year) return 1;
+                    return a.name.localeCompare(b.name);
+                });
+                setAlumni(alumniList);
                 setLoading(false);
             });
             return () => unsubscribe();
@@ -592,7 +661,8 @@ const AlumniPage = ({ user, setPage }) => {
 
     const filteredAlumni = alumni.filter(person => 
         person.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        person.year.toString().includes(searchTerm)
+        person.year.toString().includes(searchTerm) ||
+        (person.courseName && person.courseName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     if (loading) return <p>Loading alumni...</p>;
@@ -604,7 +674,7 @@ const AlumniPage = ({ user, setPage }) => {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input 
                         type="text"
-                        placeholder="Search by name or year..."
+                        placeholder="Search by name, year, or course..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full p-4 pl-12 border border-gray-300 rounded-full focus:ring-2 focus:ring-orange-500 focus:border-transparent transition"
@@ -626,12 +696,13 @@ const AlumniPage = ({ user, setPage }) => {
                         transition={{ type: 'spring', stiffness: 200, damping: 20 }}
                     >
                         <img 
-                            className="w-32 h-32 rounded-full mx-auto mb-2 border-4 border-gray-200 group-hover:border-orange-500 transition-all duration-300" 
+                            className="w-32 h-32 rounded-full mx-auto mb-2 border-4 border-gray-200 group-hover:border-orange-500 transition-all duration-300 object-cover" 
                             src={person.photoURL || `https://placehold.co/200x200/E2E8F0/4A5568?text=${initials}`} 
                             alt={person.name} 
                         />
                         <h3 className="text-lg font-semibold text-gray-800">{person.name}</h3>
                         <p className="text-sm text-gray-500">Batch of {person.year}</p>
+                        <p className="text-xs text-orange-600">{person.courseName}</p>
                     </motion.div>
                 )})}
                 </AnimatePresence>
@@ -642,6 +713,81 @@ const AlumniPage = ({ user, setPage }) => {
         </PageContainer>
     );
 };
+
+const BatchmatesPage = ({ user, setPage, course }) => {
+    const [batchmates, setBatchmates] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (user && !user.isAnonymous && course) {
+            const alumniCollectionRef = collection(db, `artifacts/${appId}/public/data/alumni`);
+            // FIX: Removed compound orderBy to prevent index error. Sorting is now done client-side.
+            const q = query(alumniCollectionRef, where("courseId", "==", course.id));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                const batchmatesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Client-side sort
+                batchmatesList.sort((a, b) => {
+                    if (a.year > b.year) return -1;
+                    if (a.year < b.year) return 1;
+                    return a.name.localeCompare(b.name);
+                });
+                setBatchmates(batchmatesList);
+                setLoading(false);
+            }, (error) => {
+                console.error("Error fetching batchmates: ", error);
+                setLoading(false);
+            });
+            return () => unsubscribe();
+        } else {
+            setLoading(false);
+        }
+    }, [user, course]);
+
+    if (!user || user.isAnonymous) {
+        return <PageContainer title="Batchmates"><LoginPrompt setPage={setPage} /></PageContainer>;
+    }
+
+    if (!course) {
+        return (
+            <PageContainer title="Error" backButton={() => setPage('courses')}>
+                <p>No course selected. Please go back to the courses page and try again.</p>
+            </PageContainer>
+        );
+    }
+    
+    if (loading) return <p>Loading batchmates...</p>;
+
+    return (
+        <PageContainer title={`Batchmates: ${course.title}`} backButton={() => setPage('courses')}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {batchmates.map((person) => {
+                    const initials = person.name.split(' ').map(n => n[0]).join('').substring(0,2);
+                    return (
+                        <motion.div 
+                            key={person.id} 
+                            className="text-center"
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ type: 'spring' }}
+                        >
+                            <img 
+                                className="w-32 h-32 rounded-full mx-auto mb-2 border-4 border-gray-200 object-cover" 
+                                src={person.photoURL || `https://placehold.co/200x200/E2E8F0/4A5568?text=${initials}`} 
+                                alt={person.name} 
+                            />
+                            <h3 className="text-lg font-semibold text-gray-800">{person.name}</h3>
+                            <p className="text-sm text-gray-500">Batch of {person.year}</p>
+                        </motion.div>
+                    )
+                })}
+            </div>
+            {batchmates.length === 0 && (
+                <p className="text-center text-gray-500 mt-10">No alumni found for this course yet.</p>
+            )}
+        </PageContainer>
+    );
+};
+
 
 const GalleryPage = ({ user, setPage }) => {
     const [images, setImages] = useState([]);
@@ -685,6 +831,7 @@ const GalleryPage = ({ user, setPage }) => {
                     </motion.div>
                 ))}
             </div>
+            {images.length === 0 && <p className="text-center text-gray-500 mt-8">The gallery is empty. Check back soon for photos!</p>}
             <AnimatePresence>
                 {selectedImg && (
                     <motion.div 
@@ -695,7 +842,14 @@ const GalleryPage = ({ user, setPage }) => {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                     >
-                        <img src={selectedImg.url} alt={selectedImg.caption} className="max-w-full max-h-full rounded-lg" />
+                        <motion.img 
+                            src={selectedImg.url} 
+                            alt={selectedImg.caption} 
+                            className="max-w-full max-h-full rounded-lg" 
+                            initial={{scale: 0.8}} 
+                            animate={{scale: 1}}
+                        />
+                         {selectedImg.caption && <motion.p className="text-white absolute bottom-5 bg-black bg-opacity-50 px-4 py-2 rounded-lg">{selectedImg.caption}</motion.p>}
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -718,7 +872,8 @@ const DownloadAppPage = () => {
                     download
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="inline-flex items-center justify-center bg-green-500 text-white font-bold py-4 px-8 rounded-lg text-xl hover:bg-green-600 transition-colors"
+                    className={`inline-flex items-center justify-center bg-green-500 text-white font-bold py-4 px-8 rounded-lg text-xl hover:bg-green-600 transition-colors ${apkDownloadLink === '#' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onClick={(e) => apkDownloadLink === '#' && e.preventDefault()}
                 >
                     <Download className="mr-3 h-6 w-6" />
                     Download APK
@@ -742,7 +897,7 @@ const NoticeBoardPage = () => {
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const noticesList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
-                const createdAt = data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt);
+                const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
                 return { id: doc.id, ...data, createdAt };
             });
             setNotices(noticesList);
@@ -799,20 +954,26 @@ const NotesPage = ({ user }) => {
     const [loadingResources, setLoadingResources] = useState(true);
     const [activeTab, setActiveTab] = useState('classNotes');
 
-    const categories = [
+    const categories = useMemo(() => [
         { id: 'classNotes', label: 'Class Notes', icon: BookCopy },
         { id: 'teacherNotes', label: 'Teacher\'s Notes', icon: FileText },
         { id: 'seminarVideos', label: 'Seminar Videos', icon: Video },
         { id: 'pyq', label: 'Previous Questions', icon: Book },
         { id: 'mindMaps', label: 'Mind Maps', icon: BrainCircuit },
-    ];
+        { id: 'prospectus', label: 'Prospectus', icon: FileText},
+        { id: 'curriculum', label: 'Curriculum', icon: BookCopy},
+        { id: 'guidelines', label: 'NEP Guidelines', icon: Landmark},
+    ], []);
 
     useEffect(() => {
         const resourcesCollectionRef = collection(db, `artifacts/${appId}/public/data/resources`);
-        const q = query(resourcesCollectionRef, where("status", "==", "approved"));
+        // FIX: Removed compound query to prevent index error. Filtering is now done client-side.
+        const q = query(resourcesCollectionRef, orderBy("createdAt", "desc"));
         
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const resourcesList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const resourcesList = querySnapshot.docs
+                .map(doc => ({ id: doc.id, ...doc.data() }))
+                .filter(resource => resource.status === 'approved'); // Client-side filter
             setResources(resourcesList);
             setLoadingResources(false);
         }, (err) => {
@@ -844,7 +1005,7 @@ const NotesPage = ({ user }) => {
                 author: user.firstName || user.email,
                 userId: user.uid,
                 status: 'pending',
-                createdAt: new Date().toISOString(),
+                createdAt: serverTimestamp(),
             });
             setNewResource({ title: '', content: '', category: newResource.category });
             setSuccess("Resource submitted for review. It will appear publicly after approval.");
@@ -860,9 +1021,9 @@ const NotesPage = ({ user }) => {
         <PageContainer title="Learning Resources">
             {(!user || user.isAnonymous) && (
                  <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-md" role="alert">
-                    <p className="font-bold">Login Required</p>
-                    <p>Please log in to share resources with the community.</p>
-                </div>
+                     <p className="font-bold">Login Required</p>
+                     <p>Please log in to share resources with the community.</p>
+                 </div>
             )}
 
             {user && !user.isAnonymous && (
@@ -899,7 +1060,7 @@ const NotesPage = ({ user }) => {
                            </label>
                             <textarea
                                 id="content"
-                                placeholder={newResource.category === 'seminarVideos' ? 'https://youtube.com/watch?v=...' : 'Type notes here or paste a link...'}
+                                placeholder={newResource.category === 'seminarVideos' ? 'https://www.youtube.com/watch?v=...' : 'Type notes here or paste a link...'}
                                 value={newResource.content}
                                 onChange={(e) => setNewResource({ ...newResource, content: e.target.value })}
                                 className="w-full p-3 border border-gray-300 rounded-lg h-32 focus:ring-2 focus:ring-orange-500 focus:border-transparent transition"
@@ -968,6 +1129,7 @@ const AdminPage = ({ user }) => {
         <PageContainer title="Admin Dashboard">
             <div className="space-y-12">
                 <AdminManageContent />
+                <AdminManageCourses />
                 <AdminManageFaculty />
                 <AdminManageAlumni />
                 <AdminManageGallery />
@@ -979,6 +1141,13 @@ const AdminPage = ({ user }) => {
 };
 
 // --- Admin Sub-Components ---
+const AdminSection = ({ title, children }) => (
+    <div className="bg-gray-50 p-6 rounded-lg shadow-inner">
+        <h2 className="text-2xl font-bold mb-4 text-gray-800 border-b pb-2">{title}</h2>
+        {children}
+    </div>
+);
+
 const AdminManageContent = () => {
     const [content, setContent] = useState({ vision: '', mission: '', main: '' });
     const [loading, setLoading] = useState(true);
@@ -991,7 +1160,7 @@ const AdminManageContent = () => {
             if(doc.exists()) setContent(doc.data());
             setLoading(false);
         });
-    }, []);
+    }, [contentRef]);
 
     const handleSave = async () => {
         setSuccess('');
@@ -1003,8 +1172,7 @@ const AdminManageContent = () => {
     if (loading) return <p>Loading content editor...</p>;
 
     return (
-        <div className="bg-gray-50 p-6 rounded-lg shadow-inner">
-            <h2 className="text-2xl font-bold mb-4 text-gray-800">Manage 'About Us' Page</h2>
+        <AdminSection title="Manage 'About Us' Page">
             <SuccessBox message={success} />
             <div className="space-y-4">
                 <textarea value={content.main} onChange={e => setContent({...content, main: e.target.value})} className="w-full p-2 border rounded" rows="4" placeholder="Main description..."/>
@@ -1012,15 +1180,338 @@ const AdminManageContent = () => {
                 <textarea value={content.mission} onChange={e => setContent({...content, mission: e.target.value})} className="w-full p-2 border rounded" rows="3" placeholder="Mission..."/>
                 <button onClick={handleSave} className="bg-blue-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-blue-700">Save Content</button>
             </div>
-        </div>
+        </AdminSection>
     );
 };
 
-const AdminManageFaculty = () => { /* ... UI to add/delete faculty ... */ return <div className="bg-gray-50 p-6 rounded-lg shadow-inner"><h2 className="text-2xl font-bold mb-4 text-gray-800">Manage Faculty (Coming Soon)</h2></div>; };
-const AdminManageAlumni = () => { /* ... UI to add/delete alumni ... */ return <div className="bg-gray-50 p-6 rounded-lg shadow-inner"><h2 className="text-2xl font-bold mb-4 text-gray-800">Manage Alumni (Coming Soon)</h2></div>; };
-const AdminManageGallery = () => { /* ... UI to add/delete gallery images ... */ return <div className="bg-gray-50 p-6 rounded-lg shadow-inner"><h2 className="text-2xl font-bold mb-4 text-gray-800">Manage Gallery (Coming Soon)</h2></div>; };
-const AdminManageNotices = () => { /* ... UI to add/delete notices ... */ return <div className="bg-gray-50 p-6 rounded-lg shadow-inner"><h2 className="text-2xl font-bold mb-4 text-gray-800">Manage Notices (Coming Soon)</h2></div>; };
-const AdminManageResources = () => { /* ... UI to approve/reject resources ... */ return <div className="bg-gray-50 p-6 rounded-lg shadow-inner"><h2 className="text-2xl font-bold mb-4 text-gray-800">Manage Resources (Coming Soon)</h2></div>; };
+// Generic CRUD Hook for Admin Panels to reduce boilerplate.
+const useAdminCRUD = (collectionName) => {
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const collectionRef = useMemo(() => collection(db, `artifacts/${appId}/public/data/${collectionName}`), [collectionName]);
+
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collectionRef, (snapshot) => {
+            setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setLoading(false);
+        });
+        return unsubscribe;
+    }, [collectionRef]);
+
+    const addItem = (data) => addDoc(collectionRef, { ...data, createdAt: serverTimestamp() });
+    const updateItem = (id, data) => updateDoc(doc(db, `artifacts/${appId}/public/data/${collectionName}`, id), data);
+    const deleteItem = (id) => deleteDoc(doc(db, `artifacts/${appId}/public/data/${collectionName}`, id));
+
+    return { items, loading, addItem, updateItem, deleteItem };
+};
+
+const AdminManageCourses = () => {
+    const { items: courses, loading, addItem, updateItem, deleteItem } = useAdminCRUD('courses');
+    const [formData, setFormData] = useState({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } });
+    const [editingId, setEditingId] = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (editingId) {
+            await updateItem(editingId, formData);
+        } else {
+            await addItem(formData);
+        }
+        setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } });
+        setEditingId(null);
+    };
+
+    const handleEdit = (course) => {
+        setFormData(course);
+        setEditingId(course.id);
+    };
+
+    return (
+        <AdminSection title="Manage Courses">
+            <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Course Title" className="w-full p-2 border rounded" required />
+                <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Description" className="w-full p-2 border rounded" required />
+                <input value={formData.iconName} onChange={e => setFormData({...formData, iconName: e.target.value})} placeholder="Lucide Icon Name (e.g., Atom)" className="w-full p-2 border rounded" />
+                <div className="grid grid-cols-3 gap-2">
+                    <input value={formData.theme.border} onChange={e => setFormData({...formData, theme: {...formData.theme, border: e.target.value}})} placeholder="Border Color (e.g., border-blue-500)" className="w-full p-2 border rounded" />
+                    <input value={formData.theme.bg} onChange={e => setFormData({...formData, theme: {...formData.theme, bg: e.target.value}})} placeholder="Icon BG Color (e.g., bg-blue-100)" className="w-full p-2 border rounded" />
+                    <input value={formData.theme.text} onChange={e => setFormData({...formData, theme: {...formData.theme, text: e.target.value}})} placeholder="Icon Text Color (e.g., text-blue-500)" className="w-full p-2 border rounded" />
+                </div>
+                <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Course' : 'Add Course'}</button>
+                {editingId && <button onClick={() => { setEditingId(null); setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
+            </form>
+            {loading ? <p>Loading...</p> : (
+                <ul className="space-y-2">
+                    {courses.map(course => (
+                        <li key={course.id} className="flex justify-between items-center p-2 bg-white rounded">
+                            <span>{course.title}</span>
+                            <div>
+                                <button onClick={() => handleEdit(course)} className="text-blue-500 mr-2"><Edit size={18} /></button>
+                                <button onClick={() => deleteItem(course.id)} className="text-red-500"><Trash2 size={18}/></button>
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </AdminSection>
+    );
+};
+
+const AdminManageAlumni = () => {
+    const { items: alumni, addItem, updateItem, deleteItem } = useAdminCRUD('alumni');
+    const { items: courses } = useAdminCRUD('courses');
+    const [formData, setFormData] = useState({ name: '', year: '', courseId: '', courseName: '' });
+    const [editingId, setEditingId] = useState(null);
+
+    const handleCourseChange = (e) => {
+        const courseId = e.target.value;
+        const course = courses.find(c => c.id === courseId);
+        setFormData({ ...formData, courseId, courseName: course ? course.title : '' });
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (editingId) {
+            await updateItem(editingId, formData);
+        } else {
+            await addItem(formData);
+        }
+        setFormData({ name: '', year: '', courseId: '', courseName: '' });
+        setEditingId(null);
+    };
+
+    const handleEdit = (person) => {
+        setFormData(person);
+        setEditingId(person.id);
+    };
+
+    return (
+        <AdminSection title="Manage Alumni">
+             <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Alumnus Name" className="w-full p-2 border rounded" required />
+                <input type="number" value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} placeholder="Graduation Year" className="w-full p-2 border rounded" required />
+                <select value={formData.courseId} onChange={handleCourseChange} className="w-full p-2 border rounded" required>
+                    <option value="">Select Course</option>
+                    {courses.map(course => <option key={course.id} value={course.id}>{course.title}</option>)}
+                </select>
+                <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Alumnus' : 'Add Alumnus'}</button>
+                {editingId && <button onClick={() => { setEditingId(null); setFormData({ name: '', year: '', courseId: '', courseName: '' }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
+            </form>
+            <ul className="space-y-2">
+                {alumni.map(person => (
+                    <li key={person.id} className="flex justify-between items-center p-2 bg-white rounded">
+                        <span>{person.name} ({person.year}) - {person.courseName}</span>
+                        <div>
+                            <button onClick={() => handleEdit(person)} className="text-blue-500 mr-2"><Edit size={18} /></button>
+                            <button onClick={() => deleteItem(person.id)} className="text-red-500"><Trash2 size={18} /></button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </AdminSection>
+    );
+};
+
+const AdminManageFaculty = () => {
+    const { items: faculty, addItem, updateItem, deleteItem } = useAdminCRUD('faculty');
+    const [formData, setFormData] = useState({ name: '', title: '' });
+    const [editingId, setEditingId] = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (editingId) { await updateItem(editingId, formData); } else { await addItem(formData); }
+        setFormData({ name: '', title: '' });
+        setEditingId(null);
+    };
+
+    const handleEdit = (member) => { setFormData(member); setEditingId(member.id); };
+
+    return (
+        <AdminSection title="Manage Faculty">
+            <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Faculty Name" className="w-full p-2 border rounded" required />
+                <input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Title/Designation" className="w-full p-2 border rounded" required />
+                <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update' : 'Add'}</button>
+                {editingId && <button onClick={() => { setEditingId(null); setFormData({ name: '', title: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
+            </form>
+            <ul className="space-y-2">
+                {faculty.map(item => (
+                    <li key={item.id} className="flex justify-between items-center p-2 bg-white rounded">
+                        <span>{item.name} - {item.title}</span>
+                        <div>
+                            <button onClick={() => handleEdit(item)} className="text-blue-500 mr-2"><Edit size={18} /></button>
+                            <button onClick={() => deleteItem(item.id)} className="text-red-500"><Trash2 size={18} /></button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </AdminSection>
+    );
+};
+
+const AdminManageGallery = () => {
+    const { items: images, addItem, deleteItem } = useAdminCRUD('gallery');
+    const [file, setFile] = useState(null);
+    const [caption, setCaption] = useState('');
+    const [uploading, setUploading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!file) { setError('Please select a file to upload.'); return; }
+        setUploading(true);
+        setError('');
+        const storageRef = ref(storage, `gallery/${Date.now()}_${file.name}`);
+        try {
+            const snapshot = await uploadBytes(storageRef, file);
+            const url = await getDownloadURL(snapshot.ref);
+            await addItem({ url, caption, fileName: file.name });
+            setFile(null);
+            setCaption('');
+            e.target.reset(); // Reset file input
+        } catch (err) {
+            setError('Upload failed. Please try again.');
+            console.error(err);
+        } finally {
+            setUploading(false);
+        }
+    };
+    
+    const handleDeleteImage = async (image) => {
+        try {
+            // First, delete the Firestore document.
+            await deleteItem(image.id);
+            // Then, delete the file from Cloud Storage.
+            const imageRef = ref(storage, `gallery/${image.fileName}`);
+            await deleteObject(imageRef);
+        } catch(err) {
+            console.error("Error deleting image: ", err);
+            // If the file doesn't exist in storage but the doc does, just delete the doc.
+            if (err.code === 'storage/object-not-found') {
+                 await deleteItem(image.id);
+            }
+        }
+    }
+
+    return (
+        <AdminSection title="Manage Gallery">
+            <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <ErrorBox message={error} />
+                <input type="file" onChange={e => setFile(e.target.files[0])} className="w-full p-2 border rounded" accept="image/*" required/>
+                <input value={caption} onChange={e => setCaption(e.target.value)} placeholder="Optional Caption" className="w-full p-2 border rounded" />
+                <button type="submit" disabled={uploading} className="bg-green-600 text-white py-2 px-4 rounded disabled:bg-gray-400">{uploading ? 'Uploading...' : 'Upload Image'}</button>
+            </form>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {images.map(img => (
+                    <div key={img.id} className="relative">
+                        <img src={img.url} className="w-full h-32 object-cover rounded"/>
+                        <button onClick={() => handleDeleteImage(img)} className="absolute top-1 right-1 bg-red-600 text-white rounded-full p-1"><Trash2 size={16}/></button>
+                    </div>
+                ))}
+            </div>
+        </AdminSection>
+    );
+};
+
+const AdminManageNotices = () => {
+    const { items: notices, addItem, updateItem, deleteItem } = useAdminCRUD('notices');
+    const [formData, setFormData] = useState({ title: '', content: '' });
+    const [editingId, setEditingId] = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (editingId) { await updateItem(editingId, formData); } else { await addItem(formData); }
+        setFormData({ title: '', content: '' });
+        setEditingId(null);
+    };
+    
+    const handleEdit = (notice) => { setFormData(notice); setEditingId(notice.id); };
+
+    return (
+        <AdminSection title="Manage Notices">
+            <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Notice Title" className="w-full p-2 border rounded" required />
+                <textarea value={formData.content} onChange={e => setFormData({...formData, content: e.target.value})} placeholder="Notice Content" className="w-full p-2 border rounded" rows="4" required />
+                <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Notice' : 'Post Notice'}</button>
+                 {editingId && <button onClick={() => { setEditingId(null); setFormData({ title: '', content: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
+            </form>
+             <ul className="space-y-2">
+                {notices.map(item => (
+                    <li key={item.id} className="flex justify-between items-center p-2 bg-white rounded">
+                        <span>{item.title}</span>
+                        <div>
+                            <button onClick={() => handleEdit(item)} className="text-blue-500 mr-2"><Edit size={18} /></button>
+                            <button onClick={() => deleteItem(item.id)} className="text-red-500"><Trash2 size={18} /></button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </AdminSection>
+    );
+};
+
+const AdminManageResources = () => {
+    const [resources, setResources] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const resourcesRef = collection(db, `artifacts/${appId}/public/data/resources`);
+        const q = query(resourcesRef, orderBy("createdAt", "desc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setLoading(false);
+        });
+        return unsubscribe;
+    }, []);
+
+    const handleStatusChange = async (id, status) => {
+        const resourceRef = doc(db, `artifacts/${appId}/public/data/resources`, id);
+        await updateDoc(resourceRef, { status });
+    };
+
+    const deleteResource = (id) => {
+        deleteDoc(doc(db, `artifacts/${appId}/public/data/resources`, id));
+    };
+
+    const pending = resources.filter(r => r.status === 'pending');
+    const approved = resources.filter(r => r.status === 'approved');
+
+    return (
+        <AdminSection title="Manage Resources">
+            <h3 className="text-xl font-semibold mt-4 mb-2">Pending Approval ({pending.length})</h3>
+            {loading ? <p>Loading...</p> : pending.length === 0 ? <p>No pending resources.</p> : (
+                <ul className="space-y-2">
+                    {pending.map(res => (
+                        <li key={res.id} className="p-3 bg-yellow-50 rounded border border-yellow-200">
+                            <p className="font-bold">{res.title}</p>
+                            <p className="text-sm text-gray-600 my-1">{res.content}</p>
+                            <p className="text-xs text-gray-500">By: {res.author}</p>
+                            <div className="mt-2">
+                                <button onClick={() => handleStatusChange(res.id, 'approved')} className="bg-green-500 text-white text-xs py-1 px-2 rounded mr-2">Approve</button>
+                                <button onClick={() => deleteResource(res.id)} className="bg-red-500 text-white text-xs py-1 px-2 rounded">Reject & Delete</button>
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+
+            <h3 className="text-xl font-semibold mt-8 mb-2">Approved Resources ({approved.length})</h3>
+             {loading ? <p>Loading...</p> : approved.length === 0 ? <p>No approved resources.</p> : (
+                <ul className="space-y-2">
+                    {approved.map(res => (
+                        <li key={res.id} className="p-2 bg-white rounded flex justify-between items-center">
+                            <div>
+                                <p className="font-semibold">{res.title}</p>
+                                <p className="text-sm text-gray-500">{res.category}</p>
+                            </div>
+                            <button onClick={() => deleteResource(res.id)} className="text-red-500"><Trash2 size={18} /></button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </AdminSection>
+    );
+};
 
 
 const ContactPage = () => {
@@ -1170,6 +1661,15 @@ const LoginPage = ({ setPage }) => {
                         />
                     </div>
                 </div>
+
+                <div className="flex items-center justify-end">
+                    <div className="text-sm">
+                        <button onClick={() => setPage('forgot-password')} className="font-medium text-orange-600 hover:text-orange-500">
+                            Forgot your password?
+                        </button>
+                    </div>
+                </div>
+
                 <div>
                     <button
                         type="submit"
@@ -1208,7 +1708,7 @@ const RegisterPage = ({ setPage }) => {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 email: formData.email,
-                role: 'student'
+                role: 'student' // Default role
             });
             setSuccess("Registration successful! You can now log in.");
             setTimeout(() => setPage('login'), 2000);
@@ -1246,16 +1746,78 @@ const RegisterPage = ({ setPage }) => {
     );
 };
 
+const ForgotPasswordPage = ({ setPage }) => {
+    const [email, setEmail] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handlePasswordReset = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess('');
+        setLoading(true);
+        try {
+            await sendPasswordResetEmail(auth, email);
+            setSuccess('Password reset email sent! Please check your inbox.');
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <AuthFormContainer title="Reset your password">
+            <form className="mt-8 space-y-6" onSubmit={handlePasswordReset}>
+                <ErrorBox message={error} />
+                <SuccessBox message={success} />
+                <p className="text-center text-sm text-gray-600">
+                    Enter your email address and we will send you a link to reset your password.
+                </p>
+                <div className="rounded-md shadow-sm">
+                    <div className="relative">
+                        <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                            className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 focus:z-10 sm:text-sm"
+                            placeholder="Email address"
+                        />
+                    </div>
+                </div>
+                <div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:bg-orange-300"
+                    >
+                        {loading ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+                </div>
+            </form>
+            <p className="mt-2 text-center text-sm text-gray-600">
+                Remember your password?{' '}
+                <button onClick={() => setPage('login')} className="font-medium text-orange-600 hover:text-orange-500">
+                    Sign in
+                </button>
+            </p>
+        </AuthFormContainer>
+    );
+};
+
 
 const ProfilePage = ({ user }) => {
     if (!user) return <PageContainer title="Profile"><p>You must be logged in to view this page.</p></PageContainer>;
 
     return (
         <PageContainer title="My Profile">
-            <div className="p-4">
+            <div className="p-4 space-y-2">
                 <p><strong>Name:</strong> {user.firstName} {user.lastName}</p>
                 <p><strong>Email:</strong> {user.email}</p>
-                <p><strong>Role:</strong> {user.role}</p>
+                <p><strong>Role:</strong> <span className="capitalize font-semibold">{user.role}</span></p>
             </div>
         </PageContainer>
     );
@@ -1279,7 +1841,7 @@ const Footer = () => (
     <footer className="bg-white border-t border-gray-200">
         <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center text-gray-500">
             <p className="text-sm font-semibold text-gray-600">Disclaimer: This is a student-run website and not the official site of the Central University of Kerala.</p>
-            <p className="mt-2">&copy; {new Date().getFullYear()} Department of Education, Central University of Kerala. All Rights Reserved.</p>
+            <p className="mt-2">© {new Date().getFullYear()} Department of Education, Central University of Kerala, Periye. All Rights Reserved.</p>
             <p className="text-sm mt-2">Designed with ❤️ for students and faculty.</p>
         </div>
     </footer>
