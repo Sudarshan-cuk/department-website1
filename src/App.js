@@ -16,17 +16,27 @@ import * as LucideIcons from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- Firebase Configuration ---
-// This configuration is a placeholder and will be replaced by the environment's __firebase_config variable.
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{"apiKey":"YOUR_API_KEY","authDomain":"your-project-id.firebaseapp.com","projectId":"your-project-id","storageBucket":"your-project-id.appspot.com","messagingSenderId":"YOUR_SENDER_ID","appId":"YOUR_APP_ID"}';
+// FIX: Reverted to dynamic configuration to resolve 'auth/custom-token-mismatch'.
+// The hardcoded config was causing a mismatch with the environment's authentication token.
+// This logic ensures the app uses the correct Firebase project config provided by the execution environment.
+const firebaseConfigString = typeof __firebase_config !== 'undefined' 
+    ? __firebase_config 
+    : JSON.stringify({
+        apiKey: "AIzaSyA1wMCNN0UFzWcK_lajR8k12kYG5RIFzm0",
+        authDomain: "dept-of-education-site.firebaseapp.com",
+        projectId: "dept-of-education-site",
+        storageBucket: "dept-of-education-site.firebasestorage.app",
+        messagingSenderId: "753917525071",
+        appId: "1:753917525071:web:003e17c1e716a8333ffe3a",
+        measurementId: "G-YF2ELY4KH6"
+      });
 const firebaseConfig = JSON.parse(firebaseConfigString);
+
 
 // --- App Initialization ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-// FIX: Initialize Firestore with experimental settings to potentially mitigate network errors.
-// The ERR_QUIC_PROTOCOL_ERROR and 400 Bad Request on the 'Listen' stream suggest a network or firewall issue
-// that disrupts the standard WebChannel connection. Forcing long polling can provide a more stable
-// connection in such environments.
+// Initialize Firestore with experimental settings to potentially mitigate network errors.
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, // Fallback for environments that don't support fetch streams well
