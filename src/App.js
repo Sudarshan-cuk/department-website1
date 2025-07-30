@@ -7,9 +7,7 @@ import {
     signInWithEmailAndPassword, 
     signOut,
     signInAnonymously,
-    signInWithCustomToken,
-    RecaptchaVerifier,
-    signInWithPhoneNumber
+    signInWithCustomToken
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, onSnapshot, updateDoc, query, where, orderBy, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -1153,56 +1151,27 @@ const LoginPage = ({ setPage }) => {
 };
 
 const RegisterPage = ({ setPage }) => {
-    const [step, setStep] = useState(1); // 1: Details, 2: OTP
-    const [formData, setFormData] = useState({ email: '', password: '', firstName: '', lastName: '', phone: '' });
-    const [otp, setOtp] = useState('');
+    const [formData, setFormData] = useState({ email: '', password: '', firstName: '', lastName: '' });
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
-    const [confirmationResult, setConfirmationResult] = useState(null);
 
-    useEffect(() => {
-        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-            'size': 'invisible',
-            'callback': (response) => {
-                // reCAPTCHA solved, allow signInWithPhoneNumber.
-            }
-        });
-    }, []);
-
-    const handleDetailsSubmit = async (e) => {
+    const handleRegister = async (e) => {
         e.preventDefault();
         setError('');
+        setSuccess('');
         setLoading(true);
         try {
-            const appVerifier = window.recaptchaVerifier;
-            const result = await signInWithPhoneNumber(auth, `+91${formData.phone}`, appVerifier);
-            setConfirmationResult(result);
-            setStep(2);
-        } catch (err) {
-            setError(err.message);
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleOtpSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
-        try {
-            await confirmationResult.confirm(otp);
-            // OTP is correct, now create user with email/password
             const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
             const user = userCredential.user;
             await setDoc(doc(db, `artifacts/${appId}/users`, user.uid), {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 email: formData.email,
-                phone: formData.phone,
                 role: 'student'
             });
-            setPage('login');
+            setSuccess("Registration successful! You can now log in.");
+            setTimeout(() => setPage('login'), 2000);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -1211,38 +1180,32 @@ const RegisterPage = ({ setPage }) => {
     };
 
     return (
-        <AuthFormContainer title={step === 1 ? "Create a new account" : "Verify your number"}>
-            <AnimatePresence mode="wait">
-                {step === 1 && (
-                    <motion.form key="step1" onSubmit={handleDetailsSubmit} className="mt-8 space-y-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <ErrorBox message={error} />
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} placeholder="First Name" required className="w-full p-3 border border-gray-300 rounded-lg"/>
-                            <input value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} placeholder="Last Name" required className="w-full p-3 border border-gray-300 rounded-lg"/>
-                        </div>
-                        <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Email address" required className="w-full p-3 border border-gray-300 rounded-lg"/>
-                        <input type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Password" required className="w-full p-3 border border-gray-300 rounded-lg"/>
-                        <input type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="Phone Number (10 digits)" required pattern="[0-9]{10}" className="w-full p-3 border border-gray-300 rounded-lg"/>
-                        <div id="recaptcha-container"></div>
-                        <button type="submit" disabled={loading} className="w-full flex justify-center py-3 px-4 border border-transparent font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700">
-                            {loading ? 'Sending OTP...' : 'Get OTP'}
-                        </button>
-                    </motion.form>
-                )}
-                {step === 2 && (
-                    <motion.form key="step2" onSubmit={handleOtpSubmit} className="mt-8 space-y-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <ErrorBox message={error} />
-                        <p className="text-center text-sm text-gray-600">Enter the 6-digit code sent to +91 {formData.phone}</p>
-                        <input type="text" value={otp} onChange={e => setOtp(e.target.value)} placeholder="Enter OTP" required className="w-full p-3 border border-gray-300 rounded-lg text-center tracking-[1em]"/>
-                        <button type="submit" disabled={loading} className="w-full flex justify-center py-3 px-4 border border-transparent font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
-                            {loading ? 'Verifying...' : 'Verify & Register'}
-                        </button>
-                    </motion.form>
-                )}
-            </AnimatePresence>
+        <AuthFormContainer title="Create a new account">
+            <form className="mt-8 space-y-4" onSubmit={handleRegister}>
+                <ErrorBox message={error} />
+                <SuccessBox message={success} />
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} placeholder="First Name" required className="w-full p-3 border border-gray-300 rounded-lg"/>
+                    <input value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} placeholder="Last Name" required className="w-full p-3 border border-gray-300 rounded-lg"/>
+                </div>
+                <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Email address" required className="w-full p-3 border border-gray-300 rounded-lg"/>
+                <input type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Password" required className="w-full p-3 border border-gray-300 rounded-lg"/>
+                <div>
+                    <button type="submit" disabled={loading} className="w-full flex justify-center py-3 px-4 border border-transparent font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-green-300">
+                        {loading ? 'Registering...' : 'Register'}
+                    </button>
+                </div>
+            </form>
+             <p className="mt-2 text-center text-sm text-gray-600">
+                Already have an account?{' '}
+                <button onClick={() => setPage('login')} className="font-medium text-orange-600 hover:text-orange-500">
+                    Sign in
+                </button>
+            </p>
         </AuthFormContainer>
     );
 };
+
 
 const ProfilePage = ({ user }) => {
     if (!user) return <PageContainer title="Profile"><p>You must be logged in to view this page.</p></PageContainer>;
