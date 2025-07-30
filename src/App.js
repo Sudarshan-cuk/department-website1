@@ -17,7 +17,7 @@ import { Lock, User, Book, Briefcase, Phone, Home, Users, LogIn, LogOut, UserPlu
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- Firebase Configuration ---
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{"apiKey":"AIzaSyA1wMCNN0UFzWcK_lajR8k12kYG5RIFzm0","authDomain":"dept-of-education-site.firebaseapp.com","projectId":"dept-of-education-site","storageBucket":"dept-of-education-site.firebasestorage.app","messagingSenderId":"753917525071","appId":"1:753917525071:web:003e17c1e716a8333ffe3a","measurementId":"G-YF2ELY4KH6"}';
 const firebaseConfig = JSON.parse(firebaseConfigString);
 
 // --- App Initialization ---
@@ -1277,7 +1277,7 @@ const Footer = () => (
         <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center text-gray-500">
             <p className="text-sm font-semibold text-gray-600">Disclaimer: This is a student-run website and not the official site of the Central University of Kerala.</p>
             <p className="mt-2">&copy; {new Date().getFullYear()} Department of Education, Central University of Kerala. All Rights Reserved.</p>
-            <p className="text-sm mt-2">Designed by Sudarshan Das with ❤️ for students and faculty.</p>
+            <p className="text-sm mt-2">Designed with ❤️ for students and faculty.</p>
         </div>
     </footer>
 );
