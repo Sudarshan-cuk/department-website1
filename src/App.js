@@ -16,8 +16,6 @@ import * as LucideIcons from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // --- Firebase Configuration ---
-// FIX: Reverted to dynamic configuration to resolve 'auth/custom-token-mismatch'.
-// The hardcoded config was causing a mismatch with the environment's authentication token.
 // This logic ensures the app uses the correct Firebase project config provided by the execution environment.
 const firebaseConfigString = typeof __firebase_config !== 'undefined' 
     ? __firebase_config 
@@ -47,13 +45,13 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-dept-app';
 
 // --- Icon Mapping ---
 // Allows us to specify icon names as strings in Firestore for dynamic rendering.
-const { Lock, User, Book, Briefcase, Phone, Home, Users, LogIn, LogOut, UserPlus, Atom, Feather, Quote, Landmark, Store, Video, FileText, BrainCircuit, BookCopy, ShieldCheck, Check, X, GraduationCap, Search, Megaphone, Info, Edit, Trash2, UserCircle, Download, Camera, MessageSquare, Upload, PlusCircle, AlertCircle } = LucideIcons;
+const { Lock, User, Book, Briefcase, Phone, Home, Users, LogIn, LogOut, UserPlus, Atom, Feather, Quote, Landmark, Store, Video, FileText, BrainCircuit, BookCopy, ShieldCheck, Check, X, GraduationCap, Search, Megaphone, Info, Edit, Trash2, UserCircle, Download, Camera, MessageSquare, Upload, PlusCircle, AlertCircle, Link, Instagram, Twitter, Facebook, Youtube } = LucideIcons;
 
 const DynamicIcon = ({ name, ...props }) => {
     const IconComponent = LucideIcons[name];
     if (!IconComponent) {
         // Fallback icon if the specified one doesn't exist in lucide-react.
-        return <AlertCircle {...props} />;
+        return <Link {...props} />;
     }
     return <IconComponent {...props} />;
 };
@@ -140,7 +138,7 @@ export default function App() {
                 }
             } else {
                 // Handle anonymous or logged-out users.
-                setUser(currentUser ? { isAnonymous: true } : null);
+                setUser(currentUser ? { isAnonymous: true, uid: currentUser.uid } : null);
             }
             setLoading(false);
         });
@@ -150,7 +148,7 @@ export default function App() {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
+                } else if (!auth.currentUser) {
                     await signInAnonymously(auth);
                 }
             } catch (error) {
@@ -169,21 +167,23 @@ export default function App() {
             case 'home':
                 return <HomePage setPage={setPage} />;
             case 'about':
-                return <AboutPage />;
+                return <AboutPage user={user} />;
             case 'courses':
-                return <CoursesPage setPage={setPage} setSelectedCourse={setSelectedCourse} />;
+                return <CoursesPage setPage={setPage} setSelectedCourse={setSelectedCourse} user={user} />;
             case 'faculty':
                 return <FacultyPage user={user} setPage={setPage} />;
             case 'alumni':
                 return <AlumniPage user={user} setPage={setPage} />;
             case 'batchmates':
                 return <BatchmatesPage user={user} setPage={setPage} course={selectedCourse} />;
+            case 'batch-socials':
+                return <BatchSocialsPage setPage={setPage} course={selectedCourse} />;
             case 'gallery':
                 return <GalleryPage user={user} setPage={setPage} />;
             case 'download':
                 return <DownloadAppPage />;
             case 'noticeboard':
-                return <NoticeBoardPage />;
+                return <NoticeBoardPage user={user} />;
             case 'notes':
                 return <NotesPage user={user} />;
             case 'contact':
@@ -234,7 +234,7 @@ export default function App() {
                     </motion.div>
                 </AnimatePresence>
             </main>
-            <Footer />
+            <Footer user={user} />
         </div>
     );
 }
@@ -471,11 +471,12 @@ const HomePage = ({ setPage }) => (
     </>
 );
 
-const AboutPage = () => {
+const AboutPage = ({ user }) => {
     const [content, setContent] = useState({ vision: '', mission: '', main: '' });
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!user) return; // Wait for auth to be ready
         const docRef = doc(db, `artifacts/${appId}/public/data/pageContent`, "about");
         const unsubscribe = onSnapshot(docRef, (doc) => {
             if (doc.exists()) {
@@ -491,7 +492,7 @@ const AboutPage = () => {
             setLoading(false);
         });
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
     if (loading) return <p>Loading content...</p>;
 
@@ -512,11 +513,12 @@ const AboutPage = () => {
     );
 };
 
-const CoursesPage = ({ setPage, setSelectedCourse }) => {
+const CoursesPage = ({ setPage, setSelectedCourse, user }) => {
     const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!user) return; // Wait for auth to be ready
         const coursesCollectionRef = collection(db, `artifacts/${appId}/public/data/courses`);
         const q = query(coursesCollectionRef, orderBy("title"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -527,11 +529,11 @@ const CoursesPage = ({ setPage, setSelectedCourse }) => {
             setLoading(false);
         });
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
-    const handleViewBatchmates = (course) => {
+    const handleNavigation = (course, page) => {
         setSelectedCourse(course);
-        setPage('batchmates');
+        setPage(page);
     };
     
     if (loading) return <p>Loading courses...</p>;
@@ -565,14 +567,22 @@ const CoursesPage = ({ setPage, setSelectedCourse }) => {
                                     <p className="text-gray-600 flex-grow">{spec.description}</p>
                                 </div>
                             </div>
-                            <div className="mt-6 text-center">
+                            <div className="mt-6 text-center space-y-2">
                                 <motion.button 
                                      whileHover={{ scale: 1.05 }} 
                                      whileTap={{ scale: 0.95 }}
-                                     onClick={() => handleViewBatchmates(spec)} 
+                                     onClick={() => handleNavigation(spec, 'batchmates')} 
                                      className="bg-orange-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors w-full"
                                 >
                                      View Batchmates
+                                 </motion.button>
+                                 <motion.button 
+                                     whileHover={{ scale: 1.05 }} 
+                                     whileTap={{ scale: 0.95 }}
+                                     onClick={() => handleNavigation(spec, 'batch-socials')} 
+                                     className="bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors w-full"
+                                >
+                                     Social Links
                                  </motion.button>
                             </div>
                         </motion.div>
@@ -798,6 +808,50 @@ const BatchmatesPage = ({ user, setPage, course }) => {
     );
 };
 
+const BatchSocialsPage = ({ setPage, course }) => {
+    if (!course) {
+        return (
+            <PageContainer title="Error" backButton={() => setPage('courses')}>
+                <p>No course selected. Please go back to the courses page and try again.</p>
+            </PageContainer>
+        );
+    }
+
+    const batches = course.batches || {};
+    const sortedYears = Object.keys(batches).sort((a, b) => b - a); // Sort years descending
+
+    return (
+        <PageContainer title={`${course.title} - Social Links`} backButton={() => setPage('courses')}>
+            {sortedYears.length === 0 ? (
+                <p className="text-center text-gray-500">No social links have been added for this course yet.</p>
+            ) : (
+                <div className="space-y-8">
+                    {sortedYears.map(year => (
+                        <div key={year}>
+                            <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Batch of {year}</h2>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                                {batches[year].map((link, index) => (
+                                    <motion.a
+                                        key={index}
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center p-4 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                        whileHover={{ scale: 1.05 }}
+                                    >
+                                        <DynamicIcon name={link.platform} className="h-6 w-6 mr-3 text-gray-700" />
+                                        <span className="font-semibold text-gray-800">{link.platform}</span>
+                                    </motion.a>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </PageContainer>
+    );
+};
+
 
 const GalleryPage = ({ user, setPage }) => {
     const [images, setImages] = useState([]);
@@ -895,12 +949,13 @@ const DownloadAppPage = () => {
 };
 
 
-const NoticeBoardPage = () => {
+const NoticeBoardPage = ({ user }) => {
     const [notices, setNotices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     useEffect(() => {
+        if (!user) return; // Wait for auth to be ready
         const noticesCollectionRef = collection(db, `artifacts/${appId}/public/data/notices`);
         const q = query(noticesCollectionRef, orderBy("createdAt", "desc"));
 
@@ -919,7 +974,7 @@ const NoticeBoardPage = () => {
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
     const isNew = (date) => {
         const threeDaysAgo = new Date();
@@ -976,6 +1031,7 @@ const NotesPage = ({ user }) => {
     ], []);
 
     useEffect(() => {
+        if (!user) return; // Wait for auth to be ready
         const resourcesCollectionRef = collection(db, `artifacts/${appId}/public/data/resources`);
         // FIX: Removed compound query to prevent index error. Filtering is now done client-side.
         const q = query(resourcesCollectionRef, orderBy("createdAt", "desc"));
@@ -993,7 +1049,7 @@ const NotesPage = ({ user }) => {
         });
         
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
     const handleAddResource = async (e) => {
         e.preventDefault();
@@ -1145,6 +1201,7 @@ const AdminPage = ({ user }) => {
                 <AdminManageGallery />
                 <AdminManageNotices />
                 <AdminManageResources />
+                <AdminManageSocialLinks />
             </div>
         </PageContainer>
     );
@@ -1195,18 +1252,19 @@ const AdminManageContent = () => {
 };
 
 // Generic CRUD Hook for Admin Panels to reduce boilerplate.
-const useAdminCRUD = (collectionName) => {
+const useAdminCRUD = (collectionName, user) => {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const collectionRef = useMemo(() => collection(db, `artifacts/${appId}/public/data/${collectionName}`), [collectionName]);
 
     useEffect(() => {
+        if (!user) return; // FIX: Wait for user object before attaching listener
         const unsubscribe = onSnapshot(collectionRef, (snapshot) => {
             setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             setLoading(false);
         });
-        return unsubscribe;
-    }, [collectionRef]);
+        return () => unsubscribe();
+    }, [collectionRef, user]);
 
     const addItem = (data) => addDoc(collectionRef, { ...data, createdAt: serverTimestamp() });
     const updateItem = (id, data) => updateDoc(doc(db, `artifacts/${appId}/public/data/${collectionName}`, id), data);
@@ -1215,9 +1273,9 @@ const useAdminCRUD = (collectionName) => {
     return { items, loading, addItem, updateItem, deleteItem };
 };
 
-const AdminManageCourses = () => {
-    const { items: courses, loading, addItem, updateItem, deleteItem } = useAdminCRUD('courses');
-    const [formData, setFormData] = useState({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } });
+const AdminManageCourses = ({ user }) => {
+    const { items: courses, loading, addItem, updateItem, deleteItem } = useAdminCRUD('courses', user);
+    const [formData, setFormData] = useState({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' }, batches: {} });
     const [editingId, setEditingId] = useState(null);
 
     const handleSubmit = async (e) => {
@@ -1227,13 +1285,46 @@ const AdminManageCourses = () => {
         } else {
             await addItem(formData);
         }
-        setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } });
+        setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' }, batches: {} });
         setEditingId(null);
     };
 
     const handleEdit = (course) => {
-        setFormData(course);
+        setFormData({ batches: {}, ...course }); // Ensure batches is an object
         setEditingId(course.id);
+    };
+    
+    // Batch and social link handlers
+    const handleAddBatch = () => {
+        const year = prompt("Enter batch year (e.g., 2024):");
+        if (year && !formData.batches[year]) {
+            setFormData(prev => ({ ...prev, batches: { ...prev.batches, [year]: [] } }));
+        }
+    };
+
+    const handleAddSocialLink = (year) => {
+        const platform = prompt("Enter platform name (e.g., Instagram, Facebook, Youtube, Twitter):");
+        const url = prompt("Enter the full URL:");
+        if (platform && url) {
+            const newLink = { platform, url };
+            setFormData(prev => ({
+                ...prev,
+                batches: {
+                    ...prev.batches,
+                    [year]: [...prev.batches[year], newLink]
+                }
+            }));
+        }
+    };
+
+    const handleRemoveSocialLink = (year, index) => {
+        setFormData(prev => ({
+            ...prev,
+            batches: {
+                ...prev.batches,
+                [year]: prev.batches[year].filter((_, i) => i !== index)
+            }
+        }));
     };
 
     return (
@@ -1247,8 +1338,30 @@ const AdminManageCourses = () => {
                     <input value={formData.theme.bg} onChange={e => setFormData({...formData, theme: {...formData.theme, bg: e.target.value}})} placeholder="Icon BG Color (e.g., bg-blue-100)" className="w-full p-2 border rounded" />
                     <input value={formData.theme.text} onChange={e => setFormData({...formData, theme: {...formData.theme, text: e.target.value}})} placeholder="Icon Text Color (e.g., text-blue-500)" className="w-full p-2 border rounded" />
                 </div>
+                
+                {editingId && (
+                    <div className="p-4 border-t mt-4">
+                        <h3 className="font-semibold text-lg mb-2">Batch Social Links</h3>
+                        <div className="space-y-4">
+                            {Object.keys(formData.batches).sort((a,b) => b-a).map(year => (
+                                <div key={year} className="p-2 bg-white rounded border">
+                                    <p className="font-bold">Batch {year}</p>
+                                    {formData.batches[year].map((link, index) => (
+                                        <div key={index} className="flex items-center justify-between text-sm ml-4">
+                                            <span>{link.platform}: {link.url}</span>
+                                            <button type="button" onClick={() => handleRemoveSocialLink(year, index)} className="text-red-500"><X size={16} /></button>
+                                        </div>
+                                    ))}
+                                    <button type="button" onClick={() => handleAddSocialLink(year)} className="text-sm text-blue-600 mt-1">+ Add Link</button>
+                                </div>
+                            ))}
+                        </div>
+                        <button type="button" onClick={handleAddBatch} className="mt-2 text-sm bg-gray-200 px-3 py-1 rounded">Add Batch Year</button>
+                    </div>
+                )}
+
                 <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Course' : 'Add Course'}</button>
-                {editingId && <button onClick={() => { setEditingId(null); setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' } }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
+                {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData({ title: '', description: '', iconName: 'Book', theme: { border: 'border-gray-500', bg: 'bg-gray-100', text: 'text-gray-500' }, batches: {} }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
             </form>
             {loading ? <p>Loading...</p> : (
                 <ul className="space-y-2">
@@ -1267,9 +1380,9 @@ const AdminManageCourses = () => {
     );
 };
 
-const AdminManageAlumni = () => {
-    const { items: alumni, addItem, updateItem, deleteItem } = useAdminCRUD('alumni');
-    const { items: courses } = useAdminCRUD('courses');
+const AdminManageAlumni = ({ user }) => {
+    const { items: alumni, addItem, updateItem, deleteItem } = useAdminCRUD('alumni', user);
+    const { items: courses } = useAdminCRUD('courses', user);
     const [formData, setFormData] = useState({ name: '', year: '', courseId: '', courseName: '' });
     const [editingId, setEditingId] = useState(null);
 
@@ -1305,7 +1418,7 @@ const AdminManageAlumni = () => {
                     {courses.map(course => <option key={course.id} value={course.id}>{course.title}</option>)}
                 </select>
                 <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Alumnus' : 'Add Alumnus'}</button>
-                {editingId && <button onClick={() => { setEditingId(null); setFormData({ name: '', year: '', courseId: '', courseName: '' }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
+                {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData({ name: '', year: '', courseId: '', courseName: '' }); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel Edit</button>}
             </form>
             <ul className="space-y-2">
                 {alumni.map(person => (
@@ -1322,8 +1435,8 @@ const AdminManageAlumni = () => {
     );
 };
 
-const AdminManageFaculty = () => {
-    const { items: faculty, addItem, updateItem, deleteItem } = useAdminCRUD('faculty');
+const AdminManageFaculty = ({ user }) => {
+    const { items: faculty, addItem, updateItem, deleteItem } = useAdminCRUD('faculty', user);
     const [formData, setFormData] = useState({ name: '', title: '' });
     const [editingId, setEditingId] = useState(null);
 
@@ -1342,7 +1455,7 @@ const AdminManageFaculty = () => {
                 <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Faculty Name" className="w-full p-2 border rounded" required />
                 <input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Title/Designation" className="w-full p-2 border rounded" required />
                 <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update' : 'Add'}</button>
-                {editingId && <button onClick={() => { setEditingId(null); setFormData({ name: '', title: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
+                {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData({ name: '', title: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
             </form>
             <ul className="space-y-2">
                 {faculty.map(item => (
@@ -1359,8 +1472,8 @@ const AdminManageFaculty = () => {
     );
 };
 
-const AdminManageGallery = () => {
-    const { items: images, addItem, deleteItem } = useAdminCRUD('gallery');
+const AdminManageGallery = ({ user }) => {
+    const { items: images, addItem, deleteItem } = useAdminCRUD('gallery', user);
     const [file, setFile] = useState(null);
     const [caption, setCaption] = useState('');
     const [uploading, setUploading] = useState(false);
@@ -1423,8 +1536,8 @@ const AdminManageGallery = () => {
     );
 };
 
-const AdminManageNotices = () => {
-    const { items: notices, addItem, updateItem, deleteItem } = useAdminCRUD('notices');
+const AdminManageNotices = ({ user }) => {
+    const { items: notices, addItem, updateItem, deleteItem } = useAdminCRUD('notices', user);
     const [formData, setFormData] = useState({ title: '', content: '' });
     const [editingId, setEditingId] = useState(null);
 
@@ -1443,7 +1556,7 @@ const AdminManageNotices = () => {
                 <input value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Notice Title" className="w-full p-2 border rounded" required />
                 <textarea value={formData.content} onChange={e => setFormData({...formData, content: e.target.value})} placeholder="Notice Content" className="w-full p-2 border rounded" rows="4" required />
                 <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Notice' : 'Post Notice'}</button>
-                 {editingId && <button onClick={() => { setEditingId(null); setFormData({ title: '', content: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
+                 {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData({ title: '', content: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
             </form>
              <ul className="space-y-2">
                 {notices.map(item => (
@@ -1460,19 +1573,20 @@ const AdminManageNotices = () => {
     );
 };
 
-const AdminManageResources = () => {
+const AdminManageResources = ({ user }) => {
     const [resources, setResources] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!user) return;
         const resourcesRef = collection(db, `artifacts/${appId}/public/data/resources`);
         const q = query(resourcesRef, orderBy("createdAt", "desc"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             setLoading(false);
         });
-        return unsubscribe;
-    }, []);
+        return () => unsubscribe();
+    }, [user]);
 
     const handleStatusChange = async (id, status) => {
         const resourceRef = doc(db, `artifacts/${appId}/public/data/resources`, id);
@@ -1519,6 +1633,43 @@ const AdminManageResources = () => {
                     ))}
                 </ul>
             )}
+        </AdminSection>
+    );
+};
+
+const AdminManageSocialLinks = ({ user }) => {
+    const { items: socialLinks, addItem, updateItem, deleteItem } = useAdminCRUD('socialLinks', user);
+    const [formData, setFormData] = useState({ name: '', url: '' });
+    const [editingId, setEditingId] = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (editingId) { await updateItem(editingId, formData); } else { await addItem(formData); }
+        setFormData({ name: '', url: '' });
+        setEditingId(null);
+    };
+
+    const handleEdit = (link) => { setFormData(link); setEditingId(link.id); };
+
+    return (
+        <AdminSection title="Manage Footer Social Links">
+            <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+                <input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Platform Name (e.g., Facebook)" className="w-full p-2 border rounded" required />
+                <input value={formData.url} onChange={e => setFormData({...formData, url: e.target.value})} placeholder="Full URL" className="w-full p-2 border rounded" required />
+                <button type="submit" className="bg-green-600 text-white py-2 px-4 rounded">{editingId ? 'Update Link' : 'Add Link'}</button>
+                {editingId && <button type="button" onClick={() => { setEditingId(null); setFormData({ name: '', url: ''}); }} className="bg-gray-500 text-white py-2 px-4 rounded ml-2">Cancel</button>}
+            </form>
+            <ul className="space-y-2">
+                {socialLinks.map(item => (
+                    <li key={item.id} className="flex justify-between items-center p-2 bg-white rounded">
+                        <span><DynamicIcon name={item.name} className="inline mr-2" />{item.name}</span>
+                        <div>
+                            <button onClick={() => handleEdit(item)} className="text-blue-500 mr-2"><Edit size={18} /></button>
+                            <button onClick={() => deleteItem(item.id)} className="text-red-500"><Trash2 size={18} /></button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
         </AdminSection>
     );
 };
@@ -1674,7 +1825,7 @@ const LoginPage = ({ setPage }) => {
 
                 <div className="flex items-center justify-end">
                     <div className="text-sm">
-                        <button onClick={() => setPage('forgot-password')} className="font-medium text-orange-600 hover:text-orange-500">
+                        <button type="button" onClick={() => setPage('forgot-password')} className="font-medium text-orange-600 hover:text-orange-500">
                             Forgot your password?
                         </button>
                     </div>
@@ -1847,12 +1998,23 @@ const NotFoundPage = ({ setPage }) => (
 
 
 // --- Footer Component ---
-const Footer = () => (
-    <footer className="bg-white border-t border-gray-200">
-        <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center text-gray-500">
-            <p className="text-sm font-semibold text-gray-600">Disclaimer: This is a student-run website and not the official site of the Central University of Kerala.</p>
-            <p className="mt-2">© {new Date().getFullYear()} Department of Education, Central University of Kerala, Periye. All Rights Reserved.</p>
-            <p className="text-sm mt-2">Designed with ❤️ for students and faculty.</p>
-        </div>
-    </footer>
-);
+const Footer = ({ user }) => {
+    const { items: socialLinks } = useAdminCRUD('socialLinks', user);
+
+    return (
+        <footer className="bg-white border-t border-gray-200">
+            <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center text-gray-500">
+                <div className="flex justify-center space-x-6 mb-4">
+                    {socialLinks.map(link => (
+                        <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-500">
+                            <DynamicIcon name={link.name} size={24} />
+                        </a>
+                    ))}
+                </div>
+                <p className="text-sm font-semibold text-gray-600">Disclaimer: This is a student-run website and not the official site of the Central University of Kerala.</p>
+                <p className="mt-2">© {new Date().getFullYear()} Department of Education, Central University of Kerala, Periye. All Rights Reserved.</p>
+                <p className="text-sm mt-2">Designed with ❤️ by Sudarshan Das for students and faculty.</p>
+            </div>
+        </footer>
+    );
+};
